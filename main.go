@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"strings"
 
 	//"runtime"
@@ -39,7 +40,11 @@ func template(path string, name string, values string) ([]map[string]interface{}
 	for {
 		var node yaml.Node
 
-		err := decoder.Decode(&node)
+		if err := decoder.Decode(&node); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, err
+		}
 
 		var m map[string]interface{}
 
@@ -48,12 +53,6 @@ func template(path string, name string, values string) ([]map[string]interface{}
 		}
 
 		manifests = append(manifests, m)
-
-		if errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			return nil, err
-		}
 	}
 
 	return manifests, cmd.Wait()
@@ -66,9 +65,9 @@ func main() {
 
 	name := flag.String("name", "", "--name <name of installation>")
 
-	kind := flag.String("kind", "", "--kind <kind of resource to watch>")
+	kind := flag.String("kind", "", "--kind <kind of resource to watch> (no shorthands)")
 
-	resource := flag.String("resource", "", "--resource <name of resource to watch>")
+	resource := flag.String("resource", "", "--resource <name of resource to watch> (regex)")
 
 	flag.Parse()
 
@@ -96,6 +95,8 @@ func main() {
 		fmt.Printf("--resource missing\n")
 		os.Exit(1)
 	}
+
+	resourceRegex := regexp.MustCompile(*resource)
 
 	*kind = strings.ToLower(*kind)
 
@@ -130,7 +131,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	printManifest(*chart, *name, *values, *kind, *resource)
+	printManifest(*chart, *name, *values, *kind, resourceRegex)
 
 	for msg := range stream.Events {
 		for _, event := range msg {
@@ -141,13 +142,13 @@ func main() {
 			fmt.Printf("chart modified, regenerating template for %s/%s\n", *kind, *resource)
 
 			fmt.Println("---")
-			printManifest(*chart, *name, *values, *kind, *resource)
+			printManifest(*chart, *name, *values, *kind, resourceRegex)
 			fmt.Println("---")
 		}
 	}
 }
 
-func printManifest(chartPath string, appName string, valuesPath string, kind string, resourceName string) {
+func printManifest(chartPath string, appName string, valuesPath string, kind string, resourceRegex *regexp.Regexp) {
 	manifests, err := template(chartPath, appName, valuesPath)
 	if err != nil {
 		fmt.Printf("error generating manifests: %v\n", err)
@@ -161,7 +162,7 @@ func printManifest(chartPath string, appName string, valuesPath string, kind str
 
 		name := manifest["metadata"].(map[string]interface{})["name"].(string)
 
-		if name != resourceName {
+		if !resourceRegex.Match([]byte(name)) {
 			continue
 		}
 
@@ -172,7 +173,5 @@ func printManifest(chartPath string, appName string, valuesPath string, kind str
 		}
 
 		fmt.Println(string(output))
-
-		break
 	}
 }
