@@ -4,18 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	//"runtime"
 	"flag"
 	"syscall"
-	"time"
 
-	"github.com/fsnotify/fsevents"
+	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,6 +51,11 @@ func template(path string, name string, values string) ([]map[string]interface{}
 
 		if err := node.Decode(&m); err != nil {
 			return nil, err
+		}
+
+		// must always have a kind
+		if m["kind"] == nil || m["apiVersion"] == nil {
+			continue
 		}
 
 		manifests = append(manifests, m)
@@ -100,13 +106,14 @@ func main() {
 
 	*kind = strings.ToLower(*kind)
 
-	stream := fsevents.EventStream{
-		Paths:   []string{*chart, *values},
-		Latency: 500 * time.Millisecond,
-		Flags:   fsevents.FileEvents,
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		panic(err)
 	}
 
-	stream.Start()
+	if err := watchAll(watcher, []string{*values, *chart}); err != nil {
+		panic(err)
+	}
 
 	fmt.Printf("watching chart %s for changes, displaying %s/%s\n", *chart, *kind, *resource)
 
@@ -133,9 +140,15 @@ func main() {
 
 	printManifest(*chart, *name, *values, *kind, resourceRegex)
 
-	for msg := range stream.Events {
-		for _, event := range msg {
-			if event.Flags&fsevents.ItemModified == 0 {
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+
+			}
+
+			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
 				continue
 			}
 
@@ -144,8 +157,16 @@ func main() {
 			fmt.Println("---")
 			printManifest(*chart, *name, *values, *kind, resourceRegex)
 			fmt.Println("---")
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+
+			fmt.Printf("error: %v\n", err)
+			os.Exit(1)
 		}
 	}
+
 }
 
 func printManifest(chartPath string, appName string, valuesPath string, kind string, resourceRegex *regexp.Regexp) {
@@ -174,4 +195,34 @@ func printManifest(chartPath string, appName string, valuesPath string, kind str
 
 		fmt.Println(string(output))
 	}
+}
+
+func watchAll(watcher *fsnotify.Watcher, paths []string) error {
+	var walk fs.WalkDirFunc = func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		watcher.Add(path)
+
+		return nil
+	}
+
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("failed to understand if %s is a file or directory: %v", path, err)
+		}
+
+		if !info.IsDir() {
+			watcher.Add(path)
+			continue
+		}
+
+		if err := filepath.WalkDir(path, walk); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
