@@ -5,7 +5,7 @@ import (
 )
 
 func TestTemplateRendering(t *testing.T) {
-	manifests, err := template("test/nginx", "nginx", "test/nginx/values.yaml")
+	manifests, err := template("test/nginx", "nginx")
 	if err != nil {
 		t.Fatal(err)
 	}
