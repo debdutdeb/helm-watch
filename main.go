@@ -20,8 +20,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func template(path string, name string, values string) ([]map[string]interface{}, error) {
-	args := append(flag.Args(), "template", name, path, "-f", values)
+func template(path, name string) ([]map[string]interface{}, error) {
+	args := []string{"template"}
+
+	if name != "" {
+		args = append(args, name, path)
+	} else {
+		args = append(args, path)
+	}
+
+	args = append(args, flag.Args()...)
 
 	cmd := exec.Command("helm", args...)
 
@@ -29,6 +37,8 @@ func template(path string, name string, values string) ([]map[string]interface{}
 	if err != nil {
 		return nil, err
 	}
+
+	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -67,55 +77,70 @@ func template(path string, name string, values string) ([]map[string]interface{}
 func main() {
 	chart := flag.String("chart", "", "--chart <path to local chart>")
 
-	values := flag.String("values", "", "--values <path to values file>")
+	kinds := flag.String("kinds", "", "--kinds <kind of resource to watch> (no shorthands, separated by comma)")
 
-	name := flag.String("name", "", "--name <name of installation>")
+	names := flag.String("names", "", "--names <name of resource to watch> (regex, separated by comma)")
 
-	kind := flag.String("kind", "", "--kind <kind of resource to watch> (no shorthands)")
+	releaseName := flag.String("release-name", "", "--release-name <name of release> or use \"-- --generate-name\"")
 
-	resource := flag.String("resource", "", "--resource <name of resource to watch> (regex)")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s: helm watch --chart <chart> --kinds <kinds> --names <resources> [--release-name [release]] -- [optional args for \"helm template\" command\n", os.Args[0])
+
+		flag.PrintDefaults()
+	}
 
 	flag.Parse()
+
+	tracking := []string{*chart}
+
+	args := flag.Args()
+
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-f" || args[i] == "--values" {
+			for _, file := range strings.Split(args[i+1], ",") {
+				tracking = append(tracking, file)
+			}
+			break
+		}
+	}
 
 	if chart == nil {
 		fmt.Printf("--chart missing\n")
 		os.Exit(1)
 	}
 
-	if values == nil {
-		fmt.Printf("--values missing\n")
+	if kinds == nil {
+		fmt.Printf("--kinds missing\n")
 		os.Exit(1)
 	}
 
-	if name == nil {
-		fmt.Printf("--name missing\n")
+	if names == nil {
+		fmt.Printf("--names missing\n")
 		os.Exit(1)
 	}
 
-	if kind == nil {
-		fmt.Printf("--kind missing\n")
-		os.Exit(1)
+	var kindToName = make(map[string]*regexp.Regexp)
+
+	{
+		kinds := strings.Split(*kinds, ",")
+
+		names := strings.Split(*names, ",")
+
+		for i, kind := range kinds {
+			kindToName[kind] = regexp.MustCompile(names[i])
+		}
 	}
-
-	if resource == nil {
-		fmt.Printf("--resource missing\n")
-		os.Exit(1)
-	}
-
-	resourceRegex := regexp.MustCompile(*resource)
-
-	*kind = strings.ToLower(*kind)
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		panic(err)
 	}
 
-	if err := watchAll(watcher, []string{*values, *chart}); err != nil {
+	if err := watchAll(watcher, tracking); err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("watching chart %s for changes, displaying %s/%s\n", *chart, *kind, *resource)
+	fmt.Printf("watching chart %s for changes, displaying %s/%s\n", *chart, *kinds, *names)
 
 	//go func() {
 	//	t := time.NewTicker(time.Second * 5)
@@ -138,7 +163,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	printManifest(*chart, *name, *values, *kind, resourceRegex)
+	printManifest(*chart, *releaseName, kindToName)
 
 	for {
 		select {
@@ -152,10 +177,10 @@ func main() {
 				continue
 			}
 
-			fmt.Printf("chart modified, regenerating template for %s/%s\n", *kind, *resource)
+			fmt.Printf("chart modified, regenerating template for %s/%s\n", *kinds, *names)
 
 			fmt.Println("---")
-			printManifest(*chart, *name, *values, *kind, resourceRegex)
+			printManifest(*chart, *releaseName, kindToName)
 			fmt.Println("---")
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -169,31 +194,35 @@ func main() {
 
 }
 
-func printManifest(chartPath string, appName string, valuesPath string, kind string, resourceRegex *regexp.Regexp) {
-	manifests, err := template(chartPath, appName, valuesPath)
+func printManifest(chartPath, releaseName string, tracking map[string]*regexp.Regexp) {
+	manifests, err := template(chartPath, releaseName)
 	if err != nil {
 		fmt.Printf("error generating manifests: %v\n", err)
 		return
 	}
 
 	for _, manifest := range manifests {
-		if strings.ToLower(manifest["kind"].(string)) != kind {
-			continue
-		}
 
 		name := manifest["metadata"].(map[string]interface{})["name"].(string)
 
-		if !resourceRegex.Match([]byte(name)) {
-			continue
+		for kind, resource := range tracking {
+			if strings.ToLower(manifest["kind"].(string)) != kind {
+				continue
+			}
+
+			if !resource.Match([]byte(name)) {
+				continue
+			}
+
+			output, err := yaml.Marshal(manifest)
+			if err != nil {
+				fmt.Printf("invalid YAML: %v\n", err)
+				break
+			}
+
+			fmt.Println(string(output))
 		}
 
-		output, err := yaml.Marshal(manifest)
-		if err != nil {
-			fmt.Printf("invalid YAML: %v\n", err)
-			break
-		}
-
-		fmt.Println(string(output))
 	}
 }
 
