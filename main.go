@@ -126,6 +126,20 @@ func main() {
 
 		names := strings.Split(*names, ",")
 
+		diff := len(kinds) - len(names)
+
+		// we don't care about name length being bigger
+		// last ones will be ignored then
+		if diff > 0 {
+			rest := make([]string, diff)
+
+			for i := 0; i < diff; i++ {
+				rest[i] = ".+"
+			}
+
+			names = append(names, rest...)
+		}
+
 		for i, kind := range kinds {
 			kindToName[kind] = regexp.MustCompile(names[i])
 		}
