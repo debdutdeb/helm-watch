@@ -2,14 +2,12 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"type": "go",
+			"type": "shell",
 			"label": "go: build package",
-			"command": "build",
+			"command": "go",
 			"args": [
+				"build",
 				"${fileDirname}"
-			],
-			"problemMatcher": [
-				"$go"
 			],
 			"group": "build",
 			"detail": "cd /Users/debdut/Documents/Repos/helm-watch; go build ${fileDirname}"

@@ -9,10 +9,9 @@
 			"type": "go",
 			"request": "launch",
 			"preLaunchTask": "go: build package",
-			"mode": "auto",
 			"program": "${fileDirname}",
 			"args": [
-				"--help"
+				"--chart"
 			]
 		}
 	]
