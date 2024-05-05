@@ -53,4 +53,6 @@ Nothing else to it I'm afraid.
 2. I wanted to make this `helm template` drop in replacement. You should be able to just switch `template` for `watch` with filter arguments for this to work. I didn't go with this idea since then either I'd have to import the cmd (`cobra.Command`) for `template` which I don't even think is exported, or copy it, or somehow track boolean and non boolean arguments. Pain is, there is no specific flags for release name and chart path. They are positional. Without knowing which ones are boolean flags which ones aren't, I can't skip them and grab just the name and chart. Maybe there is a better way that my stupid self did not think of. But I did not entertain this idea any more than 10 seconds because of the reasons mentioned.
 3. Label selectors, for sure I'd love.
 
+## Please read before contributing
+
 Feel free to contribute any other ideas you might have. I don't expect this tool to become **wow-that-big-thing**, it's just a script in Go. Anything that is helpful to some is a win, as long as it's (idea or implementation) not objectively bad. I *might* impose some opinionated review changes on code style, please don't take it as a dig at your skill or anything. Mostly, it's my stubbornness, and the fact that I *do* have some say here.
