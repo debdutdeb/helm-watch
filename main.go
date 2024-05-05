@@ -114,11 +114,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if names == nil {
-		fmt.Printf("--names missing\n")
-		os.Exit(1)
-	}
-
 	var kindToName = make(map[string]*regexp.Regexp)
 
 	{
